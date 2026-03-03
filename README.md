@@ -161,6 +161,60 @@ Random seeds are fixed to ensure deterministic behavior.
 
 ---
 
+## 📂 Datasets
+
+RCEANet was evaluated on three publicly available brain MRI datasets from Kaggle.
+Datasets are not included in this repository and must be downloaded separately.
+
+Dataset 1 — Brain Tumor MRI Dataset
+
+Source:
+https://www.kaggle.com/datasets/masoudnickparvar/brain-tumor-mri-dataset
+
+Description:
+Multi-class brain tumor MRI dataset containing glioma, meningioma, pituitary tumor, and no-tumor classes. Images are organized into training and testing folders.
+
+Dataset 2 — Brain Tumor Classification (MRI)
+
+Source:
+https://www.kaggle.com/datasets/sartajbhuvaji/brain-tumor-classification-mri
+
+Description:
+Curated brain MRI dataset for tumor classification with labeled categories. Widely used for benchmarking deep learning models in medical image analysis.
+
+Dataset 3 — Brain MRI Scans for Tumor Classification
+
+Source:
+https://www.kaggle.com/datasets/shreyag1103/brain-mri-scans-for-brain-tumor-classification
+
+Description:
+Multi-class MRI dataset designed for supervised tumor classification experiments and generalization analysis.
+
+📁 Expected Directory Structure
+
+After downloading and extracting the datasets, organize them as follows:
+
+data/
+├── dataset1/
+│   ├── train/
+│   └── test/
+├── dataset2/
+│   ├── train/
+│   └── test/
+└── dataset3/
+    ├── train/
+    └── test/
+
+Each dataset should follow a class-wise folder structure:
+
+train/
+├── glioma/
+├── meningioma/
+├── pituitary/
+└── no_tumor/
+
+---
+
 ## 🧠 Imaging Informatics Perspective
 
 RCEANet shifts brain tumor MRI classification from purely accuracy-driven modeling toward a reliability-centered paradigm by:
@@ -179,7 +233,7 @@ If you use this code in your research, please cite:
 ```
 @article{RCEANet2026,
   title={Risk-Calibrated Evidential Attention Network for Reliable Brain Tumor MRI Classification},
-  author={Indrakumar K, Ravikumar M, et al.},
+  author={Indrakumar K, Ravikumar M.},
   journal={Journal of Imaging Informatics in Medicine},
   year={2026}
 }
@@ -190,5 +244,4 @@ If you use this code in your research, please cite:
 ## 📌 Notes
 
 - This repository is intended for academic and research use.
-- Datasets are not included and must be obtained separately.
 - The framework is modular and extendable to other medical image classification tasks.
