@@ -74,9 +74,6 @@ RCEANet/
 │   └── run_ablation.py
 │
 ├── checkpoints/
-├── results/
-│   ├── tables/
-│   └── plots/
 │
 ├── requirements.txt
 └── README.md
