@@ -1,157 +1,138 @@
+import os
+import random
+import numpy as np
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader
 import torch.optim as optim
+from tqdm import tqdm
 
+# =========================
+# 🔁 Reproducibility
+# =========================
+def set_seed(seed=42):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
+set_seed(42)
+
+# =========================
+# ⚙️ Device
+# =========================
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+# =========================
+# 📦 Import your modules
+# =========================
 from models.rceanet import RCEANet
-from data.dataset_loader import BrainTumorDataset
-from data.transforms import get_train_transforms, get_test_transforms
+from utils.dataset import get_dataloaders
+from utils.losses import evidential_loss  # your custom loss
+from utils.metrics import compute_accuracy
 
-from losses.evidential_loss import EvidentialLoss
-from losses.kl_regularization import KLDivergenceLoss
-from losses.calibration_loss import CalibrationLoss
-from losses.attention_alignment_loss import AttentionUncertaintyAlignmentLoss
+# =========================
+# 🔧 Hyperparameters
+# =========================
+EPOCHS = 50
+LR = 1e-4
+NUM_CLASSES = 4
+SAVE_PATH = "best_model.pth"
 
-from evaluation.calibration import compute_ece
-from evaluation.metrics import compute_classification_metrics
-from utils.seed import set_seed
+# =========================
+# 📊 Data
+# =========================
+train_loader, val_loader = get_dataloaders()
 
-def train_model(config,
-                use_kl=True,
-                use_calibration=True,
-                use_attention_alignment=True):
-set_seed(config.get("seed", 42))
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# =========================
+# 🧠 Model
+# =========================
+model = RCEANet(num_classes=NUM_CLASSES).to(device)
 
-    # Dataset
-    train_dataset = BrainTumorDataset(
-        root_dir=config["train_dir"],
-        transform=get_train_transforms()
-    )
+# =========================
+# ⚙️ Optimizer
+# =========================
+optimizer = optim.Adam(model.parameters(), lr=LR)
 
-    val_dataset = BrainTumorDataset(
-        root_dir=config["val_dir"],
-        transform=get_test_transforms()
-    )
+# =========================
+# 📉 Training Function
+# =========================
+def train_one_epoch(model, loader, optimizer):
+    model.train()
+    total_loss = 0
+    correct = 0
+    total = 0
 
-    train_loader = DataLoader(train_dataset,
-                              batch_size=config["batch_size"],
-                              shuffle=True,
-                              num_workers=4)
+    for images, labels in tqdm(loader, desc="Training"):
+        images = images.to(device)
+        labels = labels.to(device)
 
-    val_loader = DataLoader(val_dataset,
-                            batch_size=config["batch_size"],
-                            shuffle=False,
-                            num_workers=4)
+        optimizer.zero_grad()
 
-    # Model
-    model = RCEANet(
-        backbone_name=config["backbone"],
-        num_classes=config["num_classes"]
-    ).to(device)
+        outputs = model(images)
+        loss = evidential_loss(outputs, labels)
 
-    # Losses
-    edl_loss_fn = EvidentialLoss(config["num_classes"])
-    kl_loss_fn = KLDivergenceLoss(config["num_classes"])
-    calib_loss_fn = CalibrationLoss(config["num_classes"])
-    au_loss_fn = AttentionUncertaintyAlignmentLoss()
+        loss.backward()
+        optimizer.step()
 
-    optimizer = optim.Adam(
-        model.parameters(),
-        lr=config["learning_rate"],
-        weight_decay=config["weight_decay"]
-    )
+        total_loss += loss.item()
 
-    best_val_ece = float("inf")
-    best_model_path = "best_model.pth"
+        preds = torch.argmax(outputs, dim=1)
+        correct += (preds == labels).sum().item()
+        total += labels.size(0)
 
-    for epoch in range(config["epochs"]):
+    avg_loss = total_loss / len(loader)
+    accuracy = correct / total
 
-        model.train()
-        total_loss = 0.0
+    return avg_loss, accuracy
 
-        for images, labels in train_loader:
+# =========================
+# 📊 Validation Function
+# =========================
+def validate(model, loader):
+    model.eval()
+    total_loss = 0
+    correct = 0
+    total = 0
+
+    with torch.no_grad():
+        for images, labels in tqdm(loader, desc="Validation"):
             images = images.to(device)
             labels = labels.to(device)
 
             outputs = model(images)
+            loss = evidential_loss(outputs, labels)
 
-            alpha = outputs["alpha"]
-            probs = outputs["probs"]
-            uncertainty = outputs["uncertainty"]
-            attention_map = outputs["attention_map"]
+            total_loss += loss.item()
 
-            # Core losses
-            L_edl = edl_loss_fn(alpha, labels)
-            L_total = L_edl
+            preds = torch.argmax(outputs, dim=1)
+            correct += (preds == labels).sum().item()
+            total += labels.size(0)
 
-            if use_kl:
-                L_kl = kl_loss_fn(alpha)
-                L_total += config["lambda_kl"] * L_kl
+    avg_loss = total_loss / len(loader)
+    accuracy = correct / total
 
-            if use_calibration:
-                L_calib = calib_loss_fn(probs, labels)
-                L_total += config["lambda_calib"] * L_calib
+    return avg_loss, accuracy
 
-            if use_attention_alignment:
-                L_au = au_loss_fn(attention_map, uncertainty)
-                L_total += config["lambda_au"] * L_au
+# =========================
+# 🚀 Training Loop
+# =========================
+best_val_loss = float("inf")
 
-            optimizer.zero_grad()
-            L_total.backward()
-            optimizer.step()
+for epoch in range(EPOCHS):
+    print(f"\nEpoch [{epoch+1}/{EPOCHS}]")
 
-            total_loss += L_total.item()
+    train_loss, train_acc = train_one_epoch(model, train_loader, optimizer)
+    val_loss, val_acc = validate(model, val_loader)
 
-        # Validation
-        model.eval()
-        all_probs = []
-        all_labels = []
+    print(f"Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.4f}")
+    print(f"Val   Loss: {val_loss:.4f} | Val   Acc: {val_acc:.4f}")
 
-        with torch.no_grad():
-            for images, labels in val_loader:
-                images = images.to(device)
-                labels = labels.to(device)
+    # =========================
+    # 💾 Save Best Model
+    # =========================
+    if val_loss < best_val_loss:
+        best_val_loss = val_loss
+        torch.save(model.state_dict(), SAVE_PATH)
+        print("✅ Best model saved!")
 
-                outputs = model(images)
-
-                all_probs.append(outputs["probs"])
-                all_labels.append(labels)
-
-        probs = torch.cat(all_probs)
-        labels = torch.cat(all_labels)
-
-        val_metrics = compute_classification_metrics(
-            probs, labels, config["num_classes"]
-        )
-
-        val_ece = compute_ece(probs, labels)
-
-        print(f"\nEpoch {epoch+1}/{config['epochs']}")
-        print(f"Train Loss: {total_loss:.4f}")
-        print(f"Val Accuracy: {val_metrics['accuracy']:.4f}")
-        print(f"Val ECE: {val_ece:.4f}")
-if __name__ == "__main__":
-    import argparse
-    import yaml
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--config", type=str, default="configs/example_config.yaml")
-    args = parser.parse_args()
-
-    with open(args.config) as f:
-        config = yaml.safe_load(f)
-
-    train_model(config)
-
-import os
-
-os.makedirs("checkpoints", exist_ok=True)
-best_model_path = os.path.join("checkpoints", "best_model.pth")
-
-        # Save best model based on calibration
-        if val_ece < best_val_ece:
-            best_val_ece = val_ece
-            torch.save(model.state_dict(), best_model_path)
-
-    return best_model_path
+print("\n🎉 Training Complete!")
